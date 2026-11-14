@@ -1,8 +1,6 @@
-'use strict'
-
-const anafanafo = require('anafanafo')
-const { brightness } = require('./color')
-const { XmlElement, ElementList } = require('./xml')
+import anafanafo from 'anafanafo'
+import { brightness } from './color.js'
+import { XmlElement, ElementList } from './xml.js'
 
 // https://github.com/badges/shields/pull/1132
 const FONT_SCALE_UP_FACTOR = 10
@@ -12,6 +10,8 @@ const FONT_FAMILY = 'Verdana,Geneva,DejaVu Sans,sans-serif'
 const WIDTH_FONT = '11px Verdana'
 const SOCIAL_FONT_FAMILY = 'Helvetica Neue,Helvetica,Arial,sans-serif'
 
+const DEFAULT_TEXT_FILL = '#fff'
+
 function capitalize(s) {
   return `${s.charAt(0).toUpperCase()}${s.slice(1)}`
 }
@@ -19,10 +19,16 @@ function capitalize(s) {
 function colorsForBackground(color) {
   const brightnessThreshold = 0.69
   if (brightness(color) <= brightnessThreshold) {
-    return { textColor: '#fff', shadowColor: '#010101' }
+    return { textColor: DEFAULT_TEXT_FILL, shadowColor: '#010101' }
   } else {
     return { textColor: '#333', shadowColor: '#ccc' }
   }
+}
+
+function withTextFill(attrs, textColor) {
+  // For non-social badges, parent text groups set fill="#fff", so child text fill
+  // attributes that match can be omitted to shrink the SVG.
+  return textColor === DEFAULT_TEXT_FILL ? attrs : { ...attrs, fill: textColor }
 }
 
 function roundUpToOdd(val) {
@@ -62,14 +68,14 @@ function getLogoElement({ logo, horizPadding, badgeHeight, logoWidth }) {
       y: 0.5 * (badgeHeight - logoHeight),
       width: logoWidth,
       height: logoHeight,
-      'xlink:href': logo,
+      href: logo,
     },
   })
 }
 
 function renderBadge(
   { links, leftWidth, rightWidth, height, accessibleText },
-  content
+  content,
 ) {
   const width = leftWidth + rightWidth
   const leftLink = links[0]
@@ -83,13 +89,12 @@ function renderBadge(
     ? new XmlElement({
         name: 'a',
         content,
-        attrs: { target: '_blank', 'xlink:href': leftLink },
+        attrs: { target: '_blank', href: leftLink },
       })
     : new ElementList({ content })
 
   const svgAttrs = {
     xmlns: 'http://www.w3.org/2000/svg',
-    'xmlns:xlink': 'http://www.w3.org/1999/xlink',
     width,
     height,
   }
@@ -126,8 +131,9 @@ class Badge {
     logo,
     logoWidth,
     logoPadding,
-    color = '#4c1',
+    color = '#4b0',
     labelColor,
+    idSuffix = '',
   }) {
     const horizPadding = 5
     const hasLogo = !!logo
@@ -159,7 +165,7 @@ class Badge {
     }
     let rightWidth = messageWidth + 2 * horizPadding
     if (hasLogo && !hasLabel) {
-      rightWidth += totalLogoWidth + horizPadding - 1
+      rightWidth += totalLogoWidth + (message.length ? horizPadding - 1 : 0)
     }
 
     const width = leftWidth + rightWidth
@@ -178,6 +184,7 @@ class Badge {
     this.label = label
     this.message = message
     this.accessibleText = accessibleText
+    this.idSuffix = idSuffix
 
     this.logoElement = getLogoElement({
       logo,
@@ -198,36 +205,56 @@ class Badge {
     const { textColor, shadowColor } = colorsForBackground(color)
     const x =
       FONT_SCALE_UP_FACTOR * (leftMargin + 0.5 * textWidth + this.horizPadding)
+    const y = 140 + this.constructor.verticalMargin
+    const textLength = FONT_SCALE_UP_FACTOR * textWidth
 
-    const text = new XmlElement({
-      name: 'text',
-      content: [content],
-      attrs: {
-        x,
-        y: 140 + this.constructor.verticalMargin,
-        transform: FONT_SCALE_DOWN_VALUE,
-        fill: textColor,
-        textLength: FONT_SCALE_UP_FACTOR * textWidth,
-      },
-    })
-
-    const shadowText = new XmlElement({
-      name: 'text',
-      content: [content],
-      attrs: {
-        'aria-hidden': 'true',
-        x,
-        y: 150 + this.constructor.verticalMargin,
-        fill: shadowColor,
-        'fill-opacity': '.3',
-        transform: FONT_SCALE_DOWN_VALUE,
-        textLength: FONT_SCALE_UP_FACTOR * textWidth,
-      },
-    })
-    const shadow = this.constructor.shadow ? shadowText : ''
+    let element
+    if (this.constructor.shadow) {
+      const text = new XmlElement({
+        name: 'text',
+        content: [content],
+        attrs: withTextFill({ x, y, textLength }, textColor),
+      })
+      const shadowY = y + 10
+      const shadowText = new XmlElement({
+        name: 'text',
+        content: [content],
+        attrs: { x, y: shadowY, 'fill-opacity': '.3', textLength },
+      })
+      const shadowBlur = new XmlElement({
+        name: 'text',
+        content: [content],
+        attrs: {
+          x,
+          y: shadowY,
+          'fill-opacity': '.8',
+          filter: 'url(#blur)',
+          textLength,
+        },
+      })
+      const shadowGroup = new XmlElement({
+        name: 'g',
+        content: [shadowBlur, shadowText],
+        attrs: { 'aria-hidden': 'true', fill: shadowColor },
+      })
+      element = new XmlElement({
+        name: 'g',
+        content: [shadowGroup, text],
+        attrs: { transform: FONT_SCALE_DOWN_VALUE },
+      })
+    } else {
+      element = new XmlElement({
+        name: 'text',
+        content: [content],
+        attrs: withTextFill(
+          { x, y, textLength, transform: FONT_SCALE_DOWN_VALUE },
+          textColor,
+        ),
+      })
+    }
 
     if (!link) {
-      return new ElementList({ content: [shadow, text] })
+      return element
     }
 
     const rect = new XmlElement({
@@ -241,8 +268,8 @@ class Badge {
     })
     return new XmlElement({
       name: 'a',
-      content: [rect, shadow, text],
-      attrs: { target: '_blank', 'xlink:href': link },
+      content: [rect, element],
+      attrs: { target: '_blank', href: link },
     })
   }
 
@@ -282,11 +309,10 @@ class Badge {
             width: this.width,
             height: this.constructor.height,
             rx,
-            fill: '#fff',
           },
         }),
       ],
-      attrs: { id: 'r' },
+      attrs: { id: `r${this.idSuffix}` },
     })
   }
 
@@ -313,7 +339,7 @@ class Badge {
       attrs: {
         width: this.width,
         height: this.constructor.height,
-        fill: 'url(#s)',
+        fill: `url(#s${this.idSuffix})`,
       },
     })
     const content = withGradient
@@ -331,12 +357,25 @@ class Badge {
         this.getMessageElement(),
       ],
       attrs: {
-        fill: '#fff',
+        fill: DEFAULT_TEXT_FILL,
         'text-anchor': 'middle',
         'font-family': FONT_FAMILY,
         'text-rendering': 'geometricPrecision',
         'font-size': 110,
       },
+    })
+  }
+
+  getBlurElement() {
+    return new XmlElement({
+      name: 'filter',
+      content: [
+        new XmlElement({
+          name: 'feGaussianBlur',
+          attrs: { stdDeviation: '16' },
+        }),
+      ],
+      attrs: { id: 'blur' },
     })
   }
 
@@ -379,14 +418,16 @@ class Plastic extends Badge {
           attrs: { offset: 1, 'stop-color': '#000', 'stop-opacity': '.5' },
         }),
       ],
-      attrs: { id: 's', x2: 0, y2: '100%' },
+      attrs: { id: `s${this.idSuffix}`, x2: 0, y2: '100%' },
     })
+
+    const blur = this.getBlurElement()
 
     const clipPath = this.getClipPathElement(4)
 
     const backgroundGroup = this.getBackgroundGroupElement({
       withGradient: true,
-      attrs: { 'clip-path': 'url(#r)' },
+      attrs: { 'clip-path': `url(#r${this.idSuffix})` },
     })
 
     return renderBadge(
@@ -397,7 +438,7 @@ class Plastic extends Badge {
         accessibleText: this.accessibleText,
         height: this.constructor.height,
       },
-      [gradient, clipPath, backgroundGroup, this.foregroundGroupElement]
+      [blur, gradient, clipPath, backgroundGroup, this.foregroundGroupElement],
     )
   }
 }
@@ -416,6 +457,8 @@ class Flat extends Badge {
   }
 
   render() {
+    const blur = this.getBlurElement()
+
     const gradient = new XmlElement({
       name: 'linearGradient',
       content: [
@@ -428,14 +471,14 @@ class Flat extends Badge {
           attrs: { offset: 1, 'stop-opacity': '.1' },
         }),
       ],
-      attrs: { id: 's', x2: 0, y2: '100%' },
+      attrs: { id: `s${this.idSuffix}`, x2: 0, y2: '100%' },
     })
 
     const clipPath = this.getClipPathElement(3)
 
     const backgroundGroup = this.getBackgroundGroupElement({
       withGradient: true,
-      attrs: { 'clip-path': 'url(#r)' },
+      attrs: { 'clip-path': `url(#r${this.idSuffix})` },
     })
 
     return renderBadge(
@@ -446,7 +489,7 @@ class Flat extends Badge {
         accessibleText: this.accessibleText,
         height: this.constructor.height,
       },
-      [gradient, clipPath, backgroundGroup, this.foregroundGroupElement]
+      [blur, gradient, clipPath, backgroundGroup, this.foregroundGroupElement],
     )
   }
 }
@@ -478,7 +521,7 @@ class FlatSquare extends Badge {
         accessibleText: this.accessibleText,
         height: this.constructor.height,
       },
-      [backgroundGroup, this.foregroundGroupElement]
+      [backgroundGroup, this.foregroundGroupElement],
     )
   }
 }
@@ -490,8 +533,9 @@ function social({
   logo,
   logoWidth,
   logoPadding,
-  color = '#4c1',
+  color = '#4b0',
   labelColor = '#555',
+  idSuffix = '',
 }) {
   // Social label is styled with a leading capital. Convert to caps here so
   // width can be measured using the correct characters.
@@ -526,7 +570,7 @@ function social({
         name: 'rect',
         attrs: {
           x: messageBubbleMainX,
-          y: 0.5,
+          y: '.5',
           width: messageRectWidth,
           height: internalHeight,
           rx: 2,
@@ -538,7 +582,7 @@ function social({
         attrs: {
           x: messageBubbleNotchX,
           y: 7.5,
-          width: 0.5,
+          width: '.5',
           height: 5,
           stroke: '#fafafa',
         },
@@ -547,7 +591,6 @@ function social({
         name: 'path',
         attrs: {
           d: `M${messageBubbleMainX} 6.5 l-3 3v1 l3 3`,
-          stroke: 'd5d5d5',
           fill: '#fafafa',
         },
       }),
@@ -565,9 +608,9 @@ function social({
     const rect = new XmlElement({
       name: 'rect',
       attrs: {
-        id: 'llink',
+        id: `llink${idSuffix}`,
         stroke: '#d5d5d5',
-        fill: 'url(#a)',
+        fill: `url(#a${idSuffix})`,
         x: '.5',
         y: '.5',
         width: labelRectWidth,
@@ -602,7 +645,7 @@ function social({
       ? new XmlElement({
           name: 'a',
           content: [shadow, text, rect],
-          attrs: { target: '_blank', 'xlink:href': leftLink },
+          attrs: { target: '_blank', href: leftLink },
         })
       : new ElementList({ content: [rect, shadow, text] })
   }
@@ -640,7 +683,7 @@ function social({
       name: 'text',
       content: [message],
       attrs: {
-        id: 'rlink',
+        id: `rlink${idSuffix}`,
         x: messageTextX,
         y: 140,
         transform: FONT_SCALE_DOWN_VALUE,
@@ -652,7 +695,7 @@ function social({
       ? new XmlElement({
           name: 'a',
           content: [rect, shadow, text],
-          attrs: { target: '_blank', 'xlink:href': rightLink },
+          attrs: { target: '_blank', href: rightLink },
         })
       : new ElementList({ content: [shadow, text] })
   }
@@ -660,7 +703,7 @@ function social({
   const style = new XmlElement({
     name: 'style',
     content: [
-      'a:hover #llink{fill:url(#b);stroke:#ccc}a:hover #rlink{fill:#4183c4}',
+      `a:hover #llink${idSuffix}{fill:url(#b${idSuffix});stroke:#ccc}a:hover #rlink${idSuffix}{fill:#4183c4}`,
     ],
   })
   const gradients = new ElementList({
@@ -681,7 +724,7 @@ function social({
             attrs: { offset: 1, 'stop-opacity': '.1' },
           }),
         ],
-        attrs: { id: 'a', x2: 0, y2: '100%' },
+        attrs: { id: `a${idSuffix}`, x2: 0, y2: '100%' },
       }),
       new XmlElement({
         name: 'linearGradient',
@@ -695,7 +738,7 @@ function social({
             attrs: { offset: 1, 'stop-opacity': '.1' },
           }),
         ],
-        attrs: { id: 'b', x2: 0, y2: '100%' },
+        attrs: { id: `b${idSuffix}`, x2: 0, y2: '100%' },
       }),
     ],
   })
@@ -704,8 +747,8 @@ function social({
     attrs: {
       stroke: 'none',
       fill: '#fcfcfc',
-      x: 0.5,
-      y: 0.5,
+      x: '.5',
+      y: '.5',
       width: labelRectWidth,
       height: internalHeight,
       rx: 2,
@@ -748,7 +791,7 @@ function social({
       accessibleText,
       height: externalHeight,
     },
-    [style, gradients, backgroundGroup, logoElement, foregroundGroup]
+    [style, gradients, backgroundGroup, logoElement, foregroundGroup],
   )
 }
 
@@ -758,7 +801,7 @@ function forTheBadge({
   links,
   logo,
   logoWidth,
-  color = '#4c1',
+  color = '#4b0',
   labelColor,
 }) {
   const FONT_SIZE = 10
@@ -801,11 +844,13 @@ function forTheBadge({
   // there is no label. When `needsLabelRect` is true, render a label rect and a
   // message rect; when false, only a message rect.
   const hasLabel = Boolean(label.length)
+  const noText = !hasLabel && !message
   const needsLabelRect = hasLabel || (logo && labelColor)
+  const gutter = noText ? LOGO_TEXT_GUTTER - LOGO_MARGIN : LOGO_TEXT_GUTTER
   let logoMinX, labelTextMinX
   if (logo) {
     logoMinX = LOGO_MARGIN
-    labelTextMinX = logoMinX + logoWidth + LOGO_TEXT_GUTTER
+    labelTextMinX = logoMinX + logoWidth + gutter
   } else {
     labelTextMinX = TEXT_MARGIN
   }
@@ -820,9 +865,8 @@ function forTheBadge({
     messageRectWidth = 2 * TEXT_MARGIN + messageTextWidth
   } else {
     if (logo) {
-      messageTextMinX = TEXT_MARGIN + logoWidth + LOGO_TEXT_GUTTER
-      messageRectWidth =
-        2 * TEXT_MARGIN + logoWidth + LOGO_TEXT_GUTTER + messageTextWidth
+      messageTextMinX = TEXT_MARGIN + logoWidth + gutter
+      messageRectWidth = 2 * TEXT_MARGIN + logoWidth + gutter + messageTextWidth
     } else {
       messageTextMinX = TEXT_MARGIN
       messageRectWidth = 2 * TEXT_MARGIN + messageTextWidth
@@ -842,13 +886,15 @@ function forTheBadge({
     const text = new XmlElement({
       name: 'text',
       content: [label],
-      attrs: {
-        transform: FONT_SCALE_DOWN_VALUE,
-        x: FONT_SCALE_UP_FACTOR * midX,
-        y: 175,
-        textLength: FONT_SCALE_UP_FACTOR * labelTextWidth,
-        fill: textColor,
-      },
+      attrs: withTextFill(
+        {
+          transform: FONT_SCALE_DOWN_VALUE,
+          x: FONT_SCALE_UP_FACTOR * midX,
+          y: 175,
+          textLength: FONT_SCALE_UP_FACTOR * labelTextWidth,
+        },
+        textColor,
+      ),
     })
 
     if (hasLeftLink && !shouldWrapBodyWithLink({ links })) {
@@ -865,7 +911,7 @@ function forTheBadge({
         content: [rect, text],
         attrs: {
           target: '_blank',
-          'xlink:href': leftLink,
+          href: leftLink,
         },
       })
     } else {
@@ -879,14 +925,16 @@ function forTheBadge({
     const text = new XmlElement({
       name: 'text',
       content: [message],
-      attrs: {
-        transform: FONT_SCALE_DOWN_VALUE,
-        x: FONT_SCALE_UP_FACTOR * midX,
-        y: 175,
-        textLength: FONT_SCALE_UP_FACTOR * messageTextWidth,
-        fill: textColor,
-        'font-weight': 'bold',
-      },
+      attrs: withTextFill(
+        {
+          transform: FONT_SCALE_DOWN_VALUE,
+          x: FONT_SCALE_UP_FACTOR * midX,
+          y: 175,
+          textLength: FONT_SCALE_UP_FACTOR * messageTextWidth,
+          'font-weight': 'bold',
+        },
+        textColor,
+      ),
     })
 
     if (hasRightLink) {
@@ -904,7 +952,7 @@ function forTheBadge({
         content: [rect, text],
         attrs: {
           target: '_blank',
-          'xlink:href': rightLink,
+          href: rightLink,
         },
       })
     } else {
@@ -961,7 +1009,7 @@ function forTheBadge({
       getMessageElement(),
     ],
     attrs: {
-      fill: '#fff',
+      fill: DEFAULT_TEXT_FILL,
       'text-anchor': 'middle',
       'font-family': FONT_FAMILY,
       'text-rendering': 'geometricPrecision',
@@ -978,11 +1026,11 @@ function forTheBadge({
       accessibleText: createAccessibleText({ label, message }),
       height: BADGE_HEIGHT,
     },
-    [backgroundGroup, foregroundGroup]
+    [backgroundGroup, foregroundGroup],
   )
 }
 
-module.exports = {
+export default {
   plastic: params => Plastic.render(params),
   flat: params => Flat.render(params),
   'flat-square': params => FlatSquare.render(params),

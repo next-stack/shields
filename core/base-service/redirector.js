@@ -1,7 +1,6 @@
 import camelcase from 'camelcase'
-import emojic from 'emojic'
 import Joi from 'joi'
-import queryString from 'query-string'
+import qs from 'qs'
 import BaseService from './base.js'
 import {
   serverHasBeenUpSinceResourceCached,
@@ -10,20 +9,22 @@ import {
 import { isValidCategory } from './categories.js'
 import { MetricHelper } from './metric-helper.js'
 import { isValidRoute, prepareRoute, namedParamsForMatch } from './route.js'
+import { openApiSchema } from './service-definitions.js'
 import trace from './trace.js'
 
 const attrSchema = Joi.object({
   name: Joi.string().min(3),
   category: isValidCategory,
-  isDeprecated: Joi.boolean().default(true),
+  isRetired: Joi.boolean().default(true),
   route: isValidRoute,
-  examples: Joi.array().has(Joi.object()).default([]),
+  routeEnum: Joi.array().items(Joi.string()).optional(),
+  openApi: openApiSchema,
   transformPath: Joi.func()
     .maxArity(1)
     .required()
     .error(
       () =>
-        '"transformPath" must be a function that transforms named params to a new path'
+        '"transformPath" must be a function that transforms named params to a new path',
     ),
   transformQueryParams: Joi.func().arity(1),
   dateAdded: Joi.date().required(),
@@ -34,9 +35,10 @@ export default function redirector(attrs) {
   const {
     name,
     category,
-    isDeprecated,
+    isRetired,
     route,
-    examples,
+    routeEnum,
+    openApi,
     transformPath,
     transformQueryParams,
     overrideTransformedQueryParams,
@@ -50,9 +52,10 @@ export default function redirector(attrs) {
       })}Redirect`
 
     static category = category
-    static isDeprecated = isDeprecated
+    static isRetired = isRetired
     static route = route
-    static examples = examples
+    static routeEnum = routeEnum
+    static openApi = openApi
 
     static register({ camp, metricInstance }, { rasterUrl }) {
       const { regex, captureNames } = prepareRoute({
@@ -76,27 +79,26 @@ export default function redirector(attrs) {
         const metricHandle = metricHelper.startRequest()
 
         const namedParams = namedParamsForMatch(captureNames, match, this)
-        trace.logTrace(
-          'inbound',
-          emojic.arrowHeadingUp,
-          'Redirector',
-          route.base
-        )
-        trace.logTrace('inbound', emojic.ticket, 'Named params', namedParams)
-        trace.logTrace('inbound', emojic.crayon, 'Query params', queryParams)
+        trace.logTrace('inbound', '⤴️', 'Redirector', route.base)
+        trace.logTrace('inbound', '🎫', 'Named params', namedParams)
+        trace.logTrace('inbound', '🖍', 'Query params', queryParams)
 
         const targetPath = encodeURI(transformPath(namedParams))
-        trace.logTrace('validate', emojic.dart, 'Target', targetPath)
+        trace.logTrace('validate', '🎯', 'Target', targetPath)
 
         let urlSuffix = ask.uri.search || ''
 
         if (transformQueryParams) {
-          const specifiedParams = queryString.parse(urlSuffix)
+          const specifiedParams = qs.parse(urlSuffix, {
+            ignoreQueryPrefix: true,
+          })
           const transformedParams = transformQueryParams(namedParams)
           const redirectParams = overrideTransformedQueryParams
             ? Object.assign(transformedParams, specifiedParams)
             : Object.assign(specifiedParams, transformedParams)
-          const outQueryString = queryString.stringify(redirectParams)
+          const outQueryString = qs.stringify(redirectParams, {
+            strictNullHandling: true,
+          })
           urlSuffix = `?${outQueryString}`
         }
 
@@ -105,13 +107,17 @@ export default function redirector(attrs) {
         const redirectUrl = `${
           format === 'png' ? rasterUrl : ''
         }${targetPath}.${format}${urlSuffix}`
-        trace.logTrace('outbound', emojic.shield, 'Redirect URL', redirectUrl)
+        trace.logTrace('outbound', '🛡', 'Redirect URL', redirectUrl)
 
         ask.res.statusCode = 301
         ask.res.setHeader('Location', redirectUrl)
 
-        // To avoid caching mistakes for a long time, and to make this simpler
-        // to reason about, use the same cache semantics as the static badge.
+        /* To avoid caching mistakes forever
+           (in the absence of cache control directives that specify otherwise,
+           301 redirects are cached without any expiry date)
+           and to make this simpler to reason about,
+           use the same cache semantics as the static badge.
+        */
         setCacheHeadersForStaticResource(ask.res)
 
         ask.res.end()

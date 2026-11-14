@@ -1,22 +1,33 @@
+import { pathParams } from '../index.js'
 import { renderVersionBadge } from '../version.js'
-import OpenVSXBase from './open-vsx-base.js'
+import { OpenVSXBase, description } from './open-vsx-base.js'
 
 export default class OpenVSXVersion extends OpenVSXBase {
   static category = 'version'
 
   static route = {
-    base: 'open-vsx',
-    pattern: 'v/:namespace/:extension',
+    base: 'open-vsx/v',
+    pattern: ':namespace/:extension',
   }
 
-  static examples = [
-    {
-      title: 'Open VSX Version',
-      namedParams: { namespace: 'redhat', extension: 'java' },
-      staticPreview: this.render({ version: '0.69.0' }),
-      keywords: this.keywords,
+  static openApi = {
+    '/open-vsx/v/{namespace}/{extension}': {
+      get: {
+        summary: 'Open VSX Version',
+        description,
+        parameters: pathParams(
+          {
+            name: 'namespace',
+            example: 'redhat',
+          },
+          {
+            name: 'extension',
+            example: 'java',
+          },
+        ),
+      },
     },
-  ]
+  }
 
   static render({ version }) {
     return renderVersionBadge({ version })

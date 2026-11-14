@@ -11,7 +11,7 @@ const bzBugStatus = Joi.equal(
   "won't fix",
   'duplicate',
   'works for me',
-  'incomplete'
+  'incomplete',
 )
 
 t.create('Bugzilla valid bug status').get('/996038.json').expectBadge({
@@ -20,9 +20,9 @@ t.create('Bugzilla valid bug status').get('/996038.json').expectBadge({
 })
 
 t.create('Bugzilla valid bug status with custom baseUrl')
-  .get('/545424.json?baseUrl=https://bugs.eclipse.org/bugs')
+  .get('/12345.json?baseUrl=https://gcc.gnu.org/bugzilla')
   .expectBadge({
-    label: 'bug 545424',
+    label: 'bug 12345',
     message: bzBugStatus,
   })
 

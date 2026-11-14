@@ -14,7 +14,7 @@ describe('GithubAuthV3Service', function () {
         schema: Joi.object({
           requiredString: Joi.string().required(),
         }).required(),
-        url: 'https://github-api.example.com/repos/badges/shields/check-runs',
+        url: '/repos/badges/shields/check-runs',
         options: {
           headers: {
             Accept: 'application/vnd.github.antiope-preview+json',
@@ -26,31 +26,47 @@ describe('GithubAuthV3Service', function () {
   }
 
   it('forwards custom Accept header', async function () {
-    const sendAndCacheRequestWithCallbacks = sinon.stub().returns(
+    const requestFetcher = sinon.stub().returns(
       Promise.resolve({
         buffer: '{"requiredString": "some-string"}',
-        res: { statusCode: 200 },
-      })
+        res: {
+          statusCode: 200,
+          headers: {
+            'x-ratelimit-limit': 12500,
+            'x-ratelimit-remaining': 7955,
+            'x-ratelimit-reset': 123456789,
+          },
+        },
+      }),
     )
     const githubApiProvider = new GithubApiProvider({
       baseUrl: 'https://github-api.example.com',
+      authType: GithubApiProvider.AUTH_TYPES.TOKEN_POOL,
+      restApiVersion: '2022-11-28',
     })
-    const mockToken = { update: sinon.mock(), invalidate: sinon.mock() }
+    const mockToken = {
+      update: sinon.mock(),
+      invalidate: sinon.mock(),
+      recordFailedAttempt: sinon.mock(),
+      resetFailedAttempts: sinon.mock(),
+    }
     sinon.stub(githubApiProvider.standardTokens, 'next').returns(mockToken)
 
     DummyGithubAuthV3Service.invoke({
-      sendAndCacheRequestWithCallbacks,
+      requestFetcher,
       githubApiProvider,
     })
 
-    expect(sendAndCacheRequestWithCallbacks).to.have.been.calledOnceWith({
-      headers: {
-        'User-Agent': 'Shields.io/2003a',
-        Accept: 'application/vnd.github.antiope-preview+json',
-        Authorization: 'token undefined',
+    expect(requestFetcher).to.have.been.calledOnceWith(
+      'https://github-api.example.com/repos/badges/shields/check-runs',
+      {
+        headers: {
+          'User-Agent': 'shields (self-hosted)/dev',
+          Accept: 'application/vnd.github.antiope-preview+json',
+          Authorization: 'token undefined',
+          'X-GitHub-Api-Version': '2022-11-28',
+        },
       },
-      url: 'https://github-api.example.com/repos/badges/shields/check-runs',
-      baseUrl: 'https://github-api.example.com',
-    })
+    )
   })
 })
